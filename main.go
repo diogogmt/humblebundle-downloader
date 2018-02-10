@@ -56,11 +56,22 @@ type HumbleBundleOrder struct {
 	} `json:"subproducts"`
 }
 
+type logger struct {
+}
+
+func (writer logger) Write(bytes []byte) (int, error) {
+	return fmt.Print(string(bytes))
+}
+
 func main() {
 	flags.Parse(os.Args[1:])
 	if *gameKey == "" {
 		log.Fatal("Missing key")
 	}
+
+	log.SetFlags(0)
+	log.SetOutput(new(logger))
+
 	// Build order endpoint URL
 	u, err := url.Parse(baseURL)
 	if err != nil {
@@ -71,14 +82,14 @@ func main() {
 	// Fetch order information
 	resp, err := http.Get(u.String())
 	if err != nil {
-		log.Fatalf("[ERROR] error downloading order information %s: %v", u, err)
+		log.Fatalf("error downloading order information %s: %v", u, err)
 	}
 	defer resp.Body.Close()
 	buf, err := ioutil.ReadAll(resp.Body)
 	order := &HumbleBundleOrder{}
 	err = json.Unmarshal(buf, order)
 	if err != nil {
-		log.Fatalf("[ERROR] error unmarshaling order", err)
+		log.Fatalf("error unmarshaling order: %v", err)
 	}
 	if *out == "" {
 		log.Printf("Human Name: %s", order.Product.HumanName)
@@ -113,69 +124,60 @@ func main() {
 					defer group.Done()
 					resp, err := http.Get(downloadURL)
 					if err != nil {
-						log.Printf("[ERROR] error downloading file %s", downloadURL)
+						log.Printf("error downloading file %s", downloadURL)
 						return
 					}
 					defer resp.Body.Close()
 
-					book_lastmod := resp.Header.Get("Last-Modified")
-					book_lastmod_time,err := http.ParseTime(book_lastmod)
+					bookLastmod := resp.Header.Get("Last-Modified")
+					bookLastmodTime, err := http.ParseTime(bookLastmod)
 					if err != nil {
-						log.Printf("[ERROR] error with Last-Modified header data %x", err)
+						log.Printf("error reading Last-Modified header data: %v", err)
 						return
 					}
 
-					log.Printf("Last-Modified Header: ~%s~", book_lastmod)
-					log.Printf("Download status: %d - %s", resp.StatusCode, downloadURL)
+					// log.Printf("Last-Modified Header: ~%s~", bookLastmod)
+					// log.Printf("Download status: %d - %s", resp.StatusCode, downloadURL)
 					if resp.StatusCode < 200 || resp.StatusCode > 299 {
-						log.Printf("[ERROR] error status code %d", resp.StatusCode)
+						log.Printf("error status code %d", resp.StatusCode)
 						return
 					}
 
 					bookFile, err := os.Create(fmt.Sprintf("%s/%s", *out, filename))
 					if err != nil {
-						log.Printf("[ERROR] error creating book file %s", err)
+						log.Printf("error creating book file (%s/%s): %v", *out, filename, err)
 						return
 					}
 					defer bookFile.Close()
 
 					s, err := ioutil.ReadAll(resp.Body)
 					if err != nil {
-						log.Printf("[ERROR] error reading response body %s into variable s", err)
+						log.Printf("error reading response body: %v", err)
 						return
 					}
-					log.Printf("Saving file %s", filename)
 					_, err = bookFile.Write(s)
 					if err != nil {
-						log.Printf("[ERROR] error reading s %s", err)
+						log.Printf("error saving file %s", err)
 						return
 					}
 					log.Printf("Finished saving file %s", filename)
-					os.Chtimes(fmt.Sprintf("%s/%s", *out, filename), book_lastmod_time, book_lastmod_time)
+					os.Chtimes(fmt.Sprintf("%s/%s", *out, filename), bookLastmodTime, bookLastmodTime)
 
 					if downloadType.SHA1 != "" {
-						log.Printf("Checking SHA1 of file %s", filename)
 						hash := sha1.New()
 						hash.Write([]byte(s))
 						bs := hash.Sum(nil)
 						if downloadType.SHA1 != fmt.Sprintf("%x", bs) {
-							log.Printf("[ERROR] SHA1 FAILED for %s -- expected %s but got %x", filename, downloadType.SHA1, bs)
-						} else {
-							log.Printf("SHA1 okay for %s", filename)
+							log.Printf("SHA1 checksum failed for %s -- expected %s but got %x", filename, downloadType.SHA1, bs)
 						}
-						log.Printf("Finished checking SHA1 for file %s", filename)
 					}
 					if downloadType.MD5 != "" {
-						log.Printf("Checking MD5 of file %s", filename)
 						hash := md5.New()
 						hash.Write([]byte(s))
 						bs := hash.Sum(nil)
 						if downloadType.MD5 != fmt.Sprintf("%x", bs) {
-							log.Printf("[ERROR] MD5 FAILED for %s -- expected %s but got %x", filename, downloadType.MD5, bs)
-						} else {
-							log.Printf("MD5 okay for %s", filename)
+							log.Printf("MD5 checksum failed for %s -- expected %s but got %x", filename, downloadType.MD5, bs)
 						}
-						log.Printf("Finished checking MD5 for file %s%s", filename)
 					}
 
 				}(fmt.Sprintf("%s.%s", prod.HumanName, strings.ToLower(strings.TrimPrefix(downloadType.Name, "."))), downloadType.URL.Web)
