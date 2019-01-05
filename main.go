@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -121,6 +122,8 @@ func main() {
 				group.Add(1)
 				go func(filename, downloadURL string) {
 					filename = strings.Replace(filename, "/", "_", -1)
+					filename = strings.Replace(filename, ".supplement", "_supplement.zip", 1)
+					filename = strings.Replace(filename, ".download", "_video.zip", 1)
 					defer group.Done()
 					resp, err := http.Get(downloadURL)
 					if err != nil {
@@ -150,34 +153,51 @@ func main() {
 					}
 					defer bookFile.Close()
 
-					s, err := ioutil.ReadAll(resp.Body)
+					_, err = io.Copy(bookFile, resp.Body)
 					if err != nil {
-						log.Printf("error reading response body: %v", err)
+						log.Printf("error copying response body to file (%s/%s): %v", *out, filename, err)
 						return
 					}
-					_, err = bookFile.Write(s)
-					if err != nil {
-						log.Printf("error saving file %s", err)
-						return
-					}
-					log.Printf("Finished saving file %s", filename)
+					log.Printf("Finished saving file %s/%s", *out, filename)
 					os.Chtimes(fmt.Sprintf("%s/%s", *out, filename), bookLastmodTime, bookLastmodTime)
 
 					if downloadType.SHA1 != "" {
+						f, err := os.Open(fmt.Sprintf("%s/%s", *out, filename))
+						if err != nil {
+							log.Printf("error reading file: %v for: %s/%s", err, *out, filename)
+							return
+						}
+						defer f.Close()
+
 						hash := sha1.New()
-						hash.Write([]byte(s))
+						if _, err := io.Copy(hash, f); err != nil {
+							log.Printf("error calculating sha1sum: %v for: %s/%s", err, *out, filename)
+						}
 						bs := hash.Sum(nil)
 						if downloadType.SHA1 != fmt.Sprintf("%x", bs) {
 							log.Printf("SHA1 checksum failed for %s -- expected %s but got %x", filename, downloadType.SHA1, bs)
-						}
+						} // else {
+						// 	log.Printf("SHA1 checksum is good for %s/%s -- %x", *out, filename, bs)
+						// }
 					}
 					if downloadType.MD5 != "" {
+						f, err := os.Open(fmt.Sprintf("%s/%s", *out, filename))
+						if err != nil {
+							log.Printf("error reading file: %v for: %s/%s", err, *out, filename)
+							return
+						}
+						defer f.Close()
+
 						hash := md5.New()
-						hash.Write([]byte(s))
+						if _, err := io.Copy(hash, f); err != nil {
+							log.Printf("error calculating md5sum: %v for: %s/%s", err, *out, filename)
+						}
 						bs := hash.Sum(nil)
 						if downloadType.MD5 != fmt.Sprintf("%x", bs) {
 							log.Printf("MD5 checksum failed for %s -- expected %s but got %x", filename, downloadType.MD5, bs)
-						}
+						} // else {
+						// 	log.Printf("MD5 checksum is good for %s/%s -- %x", *out, filename, bs)
+						// }
 					}
 
 				}(fmt.Sprintf("%s.%s", prod.HumanName, strings.ToLower(strings.TrimPrefix(downloadType.Name, "."))), downloadType.URL.Web)
