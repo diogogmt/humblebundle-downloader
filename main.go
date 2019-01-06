@@ -161,6 +161,9 @@ func main() {
 					log.Printf("Finished saving file %s/%s", *out, filename)
 					os.Chtimes(fmt.Sprintf("%s/%s", *out, filename), bookLastmodTime, bookLastmodTime)
 
+					// log.Printf("TZ=UTC touch -d \"%s\" \"%s/%s\"", strings.Replace(fmt.Sprintf("%s", bookLastmodTime), " UTC", "", 1), *out, filename)
+					// log.Printf("\t%-9d \"%s\"", resp.ContentLength, downloadURL)
+
 					if downloadType.SHA1 != "" {
 						f, err := os.Open(fmt.Sprintf("%s/%s", *out, filename))
 						if err != nil {
