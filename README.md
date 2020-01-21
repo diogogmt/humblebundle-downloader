@@ -95,6 +95,36 @@ When you access the Humble Bundle download page `https://www.humblebundle.com/do
 ```
 With that data structure the CLI iterates through all the book purchases and download all the listed files.
 
+Added option to exclude download types using .ignore file
+
+New shell script to determine download types to be added, if desired to the .ignore file
+
+## How to compile
+
+### Setup go environment
+
+Example has golang installed at `/opt/go`
+
+```shell
+$ cat ~/.go
+# Point to the local installation of golang.
+export GOROOT=/opt/go
+
+# Point to the location beneath which source and binaries are installed.
+export GOPATH="${HOME}/go"
+
+# Ensure that the binary-release is on your PATH.
+export PATH="${PATH}:${GOROOT}/bin"
+
+# Ensure that compiled binaries are also on your PATH.
+export PATH="${PATH}:${GOPATH}/bin"
+```
+
+```shell
+cd ~go
+go build -o bin/humblebundle-downloader src/github.com/affinityv/humblebundle-downloader/main.go
+```
+
 ## Examples
 
 Download all books from your Humble Bundle Order

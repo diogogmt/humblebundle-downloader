@@ -24,6 +24,13 @@ var (
 	out     = flags.String("out", "", "out: /path/to/save/books")
 )
 
+var (
+	fileInfo *os.FileInfo
+	err error
+)
+
+var ignoreTypes []string
+
 type HumbleBundleOrder struct {
 	AmountSpent float64
 	Product     struct {
@@ -62,6 +69,15 @@ type logger struct {
 
 func (writer logger) Write(bytes []byte) (int, error) {
 	return fmt.Print(string(bytes))
+}
+
+func Contains(a []string, x string) bool {
+	for _, n := range a {
+		if x == n {
+			return true
+		}
+	}
+	return false
 }
 
 func main() {
@@ -108,6 +124,24 @@ func main() {
 	_ = os.MkdirAll(*out, 0777)
 	log.Printf("Saving files into %s", *out)
 
+	// get fileInfo structure describing file (if it exists)
+	fileInfo, err := os.Stat(".ignore")
+	if err != nil {
+		fmt.Println("No file types to ignore")
+	} else {
+		fileBytes, err := ioutil.ReadFile(".ignore")
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		ignoreTypes = strings.Split(string(fileBytes), "\n")
+		for x := 0; x < len(ignoreTypes); x++ {
+			fmt.Printf("type: ~%s~\n",  ignoreTypes[x])
+		}
+		fmt.Printf("Ignoring File Types: \n~%s~\n", ignoreTypes)
+	}
+	fmt.Println(fileInfo)
+
 	// Download all files from order
 	var group sync.WaitGroup
 	// 1 - Iterate through all products
@@ -119,6 +153,12 @@ func main() {
 			// 3 - Iterate through download types (PDF,EPUB,MOBI)
 			for x := 0; x < len(download.DownloadTypes); x++ {
 				downloadType := download.DownloadTypes[x]
+				if Contains(ignoreTypes, downloadType.Name) {
+					fmt.Printf("   Ignoring type: ~%s~\n", downloadType.Name)
+					continue
+				// } else {
+				//	fmt.Printf("Downloading type: ~%s~\n", downloadType.Name)
+				}
 				group.Add(1)
 				go func(filename, downloadURL string) {
 					filename = strings.Replace(filename, "/", "_", -1)
