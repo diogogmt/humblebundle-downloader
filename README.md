@@ -121,6 +121,8 @@ export PATH="${PATH}:${GOPATH}/bin"
 ```
 
 ```shell
+cd ~
+. .go
 cd ~go
 go build -o bin/humblebundle-downloader src/github.com/affinityv/humblebundle-downloader/main.go
 ```
