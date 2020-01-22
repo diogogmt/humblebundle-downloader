@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"hash"
 	"io"
 	"io/ioutil"
 	"log"
@@ -22,14 +23,11 @@ var (
 	baseURL = "https://www.humblebundle.com/api/v1"
 	gameKey = flags.String("key", "", "key: Key listed in the URL params in the downloads page")
 	out     = flags.String("out", "", "out: /path/to/save/books")
+	types   = flags.String("types", "", "types: show download types")
+	downloadTypes []string
+	excludeTypes []string
+	includeTypes []string
 )
-
-var (
-	fileInfo *os.FileInfo
-	err error
-)
-
-var ignoreTypes []string
 
 type HumbleBundleOrder struct {
 	AmountSpent float64
@@ -80,91 +78,172 @@ func Contains(a []string, x string) bool {
 	return false
 }
 
-func main() {
-	flags.Parse(os.Args[1:])
-	if *gameKey == "" {
-		log.Fatal("Missing key")
+func check_checksum(filename string, checksum string, checksum_type string) {
+	if checksum == "" {
+		log.Println("checksum is empty, nothing to check")
+		return
 	}
 
-	log.SetFlags(0)
-	log.SetOutput(new(logger))
+    var hash hash.Hash
 
-	// Build order endpoint URL
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		log.Fatal(err)
+	switch checksum_type {
+	case "md5sum ":
+		hash = md5.New()
+	case "sha1sum":
+	    hash = sha1.New()
+	default:
+		log.Printf(
+			"checksum type is not valid, we have \"%s\", but it needs to be \"%s\" or \"%s\"",
+			checksum_type, "md5sum ", "sha1sum")
+		return
 	}
-	u.Path = path.Join(u.Path, "order")
-	u.Path = path.Join(u.Path, *gameKey)
-	// Fetch order information
-	resp, err := http.Get(u.String())
-	if err != nil {
-		log.Fatalf("error downloading order information %s: %v", u, err)
-	}
-	defer resp.Body.Close()
-	buf, err := ioutil.ReadAll(resp.Body)
-	order := &HumbleBundleOrder{}
-	err = json.Unmarshal(buf, order)
-	if err != nil {
-		log.Fatalf("error unmarshaling order: %v", err)
-	}
-	if *out == "" {
-		log.Printf("Human Name: %s", order.Product.HumanName)
-		if order.Product.HumanName == "" {
-			pwd, err := os.Getwd()
-			if err != nil {
-				log.Fatal(err)
-			}
-			*out = fmt.Sprintf("%s/books", pwd)
-		} else {
-			order.Product.HumanName = strings.Replace(order.Product.HumanName, "/", "_", -1)
-			*out = order.Product.HumanName
-		}
-	}
-	_ = os.MkdirAll(*out, 0777)
-	log.Printf("Saving files into %s", *out)
 
-	// get fileInfo structure describing file (if it exists)
-	fileInfo, err := os.Stat(".ignore")
+	f, err := os.Open(filename)
 	if err != nil {
-		fmt.Println("No file types to ignore")
+		log.Printf("error reading file: %v \tfor: %s", err, filename)
+		return
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(hash, f); err != nil {
+		log.Printf("error caluclating %s: %v for: %s", checksum_type, err, filename)
+	}
+	bs := hash.Sum(nil)
+	if checksum != fmt.Sprintf("%x", bs) {
+		log.Printf("%s checksum failed  for %120s -- expected %s but got %x", checksum_type, filename, checksum, bs)
 	} else {
-		fileBytes, err := ioutil.ReadFile(".ignore")
+		log.Printf("%s checksum is good for %120s -- %x", checksum_type, filename, bs)
+	}
+}
+
+func setup_exclude_fileTypes() {
+	// get stat of file (if it exists)
+	_, err := os.Stat(".exclude")
+	if err != nil {
+		fmt.Println("No download types to exclude...\n")
+	} else {
+		fileBytes, err := ioutil.ReadFile(".exclude")
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		ignoreTypes = strings.Split(string(fileBytes), "\n")
-		for x := 0; x < len(ignoreTypes); x++ {
-			fmt.Printf("type: ~%s~\n",  ignoreTypes[x])
+		excludeTypes = strings.Split(string(fileBytes), "\n")
+		// remove empty element (last one added)
+		excludeTypes = excludeTypes[:len(excludeTypes)-1]
+		// Show slices
+		// for x := 0; x < len(excludeTypes); x++ {
+		// 	fmt.Printf(".exclude type: ~%s~\n",  excludeTypes[x])
+		// }
+		if len(excludeTypes) > 0 {
+			fmt.Printf("Excluding File Types: ~%s~\n", excludeTypes)
+		} else {
+			fmt.Println(".exclude file is empty")
 		}
-		fmt.Printf("Ignoring File Types: \n~%s~\n", ignoreTypes)
 	}
-	fmt.Println(fileInfo)
+}
 
-	// Download all files from order
+func setup_include_fileTypes() {
+	// get stat of file (if it exists)
+	_, err := os.Stat(".include")
+	if err != nil {
+		fmt.Println("No download types to include...\n")
+	} else {
+		fileBytes, err := ioutil.ReadFile(".include")
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		includeTypes = strings.Split(string(fileBytes), "\n")
+		// remove empty element (last one added)
+		includeTypes = includeTypes[:len(includeTypes)-1]
+		// Show slices
+		// for x := 0; x < len(includeTypes); x++ {
+		// 	fmt.Printf(".include type: ~%s~\n",  includeTypes[x])
+		// }
+		if len(includeTypes) > 0 {
+			fmt.Printf("Including File Types: ~%s~\n", includeTypes)
+		} else {
+			fmt.Println(".include file is empty")
+		}
+	}
+}
+
+
+func get_download_types(order HumbleBundleOrder) {
+
+	fmt.Println("Building list of download types\n")
+
+	// 1 - Iterate through all products
+	for i := 0; i < len(order.Products); i++ {
+		prod := order.Products[i]
+		// 2 - Iterate through the product downloads
+		for j := 0; j < len(prod.Downloads); j++ {
+			download := prod.Downloads[j]
+			// 3 - Iterate through download types (PDF,EPUB,MOBI, ...)
+			for x := 0; x < len(download.DownloadTypes); x++ {
+				downloadType := download.DownloadTypes[x]
+				if Contains(downloadTypes, downloadType.Name) == false {
+					fmt.Printf("   New download type found: ~%s~\n", downloadType.Name)
+					downloadTypes = append(downloadTypes,  downloadType.Name)
+				}
+			}
+		}
+	}
+}
+
+func get_downloads(order HumbleBundleOrder) {
+	// Download files from order
 	var group sync.WaitGroup
 	// 1 - Iterate through all products
 	for i := 0; i < len(order.Products); i++ {
 		prod := order.Products[i]
-		// 2 - Iterate through the product downloads, currently only returns ebook platform download
+		// 2 - Iterate through the product downloads
 		for j := 0; j < len(prod.Downloads); j++ {
 			download := prod.Downloads[j]
-			// 3 - Iterate through download types (PDF,EPUB,MOBI)
+			// 3 - Iterate through download types (PDF,EPUB,MOBI, ...)
 			for x := 0; x < len(download.DownloadTypes); x++ {
 				downloadType := download.DownloadTypes[x]
-				if Contains(ignoreTypes, downloadType.Name) {
-					fmt.Printf("   Ignoring type: ~%s~\n", downloadType.Name)
-					continue
-				// } else {
-				//	fmt.Printf("Downloading type: ~%s~\n", downloadType.Name)
+				expectedFileSize := download.DownloadTypes[x].FileSize
+				if len(excludeTypes) > 0 {
+					if Contains(excludeTypes, downloadType.Name) {
+						continue
+					}
+				}
+				if len(includeTypes) > 0 {
+					if Contains(includeTypes, downloadType.Name) == false {
+						continue
+					}
 				}
 				group.Add(1)
 				go func(filename, downloadURL string) {
+
+					defer group.Done()
+
 					filename = strings.Replace(filename, "/", "_", -1)
 					filename = strings.Replace(filename, ".supplement", "_supplement.zip", 1)
 					filename = strings.Replace(filename, ".download", "_video.zip", 1)
-					defer group.Done()
+					filename = strings.Replace(filename, ".part 1", "_video_part_1.zip", 1)
+					filename = strings.Replace(filename, ".part 2", "_video_part_2.zip", 1)
+
+					// get fileInfo structure describing file (if it exists), it may exist from a previous run
+					var pathedFilename string
+					pathedFilename = fmt.Sprintf("%s/%s", *out, filename)
+					fileInfo, err := os.Stat(pathedFilename)
+					if err == nil {
+						// file exists, check size against size in order
+						// fmt.Printf("filename: %-120s\t%12d\t%12d\n", pathedFilename, fileInfo.Size(), expectedFileSize)
+						if fileInfo.Size() == expectedFileSize {
+							check_checksum(pathedFilename, downloadType.MD5,  "md5sum ")
+							check_checksum(pathedFilename, downloadType.SHA1, "sha1sum")
+							return
+						} else {
+							// to be done... perhaps, continue download ...
+							fmt.Printf("filename: %-120s\t%12d\t%s\t%s\n", pathedFilename, expectedFileSize, "new download to be started....", downloadURL)
+						}
+					} else {
+						fmt.Printf("filename: %-120s\t%12d\t%s\t%s\n", pathedFilename, expectedFileSize, "download started....", downloadURL)
+					}
+
 					resp, err := http.Get(downloadURL)
 					if err != nil {
 						log.Printf("error downloading file %s", downloadURL)
@@ -186,66 +265,93 @@ func main() {
 						return
 					}
 
-					bookFile, err := os.Create(fmt.Sprintf("%s/%s", *out, filename))
+					bookFile, err := os.Create(fmt.Sprintf("%s", pathedFilename))
 					if err != nil {
-						log.Printf("error creating book file (%s/%s): %v", *out, filename, err)
+						log.Printf("error creating book file (%s): %v", pathedFilename, err)
 						return
 					}
 					defer bookFile.Close()
 
 					_, err = io.Copy(bookFile, resp.Body)
 					if err != nil {
-						log.Printf("error copying response body to file (%s/%s): %v", *out, filename, err)
+						log.Printf("error copying response body to file (%s): %v", pathedFilename, err)
 						return
 					}
-					log.Printf("Finished saving file %s/%s", *out, filename)
-					os.Chtimes(fmt.Sprintf("%s/%s", *out, filename), bookLastmodTime, bookLastmodTime)
+					log.Printf("Finished saving file %s", pathedFilename)
+					os.Chtimes(fmt.Sprintf("%s", pathedFilename), bookLastmodTime, bookLastmodTime)
 
-					// log.Printf("TZ=UTC touch -d \"%s\" \"%s/%s\"", strings.Replace(fmt.Sprintf("%s", bookLastmodTime), " UTC", "", 1), *out, filename)
+					// log.Printf("TZ=UTC touch -d \"%s\" \"%s\"", strings.Replace(fmt.Sprintf("%s", bookLastmodTime), " UTC", "", 1), pathedFilename)
 					// log.Printf("\t%-9d \"%s\"", resp.ContentLength, downloadURL)
 
-					if downloadType.SHA1 != "" {
-						f, err := os.Open(fmt.Sprintf("%s/%s", *out, filename))
-						if err != nil {
-							log.Printf("error reading file: %v for: %s/%s", err, *out, filename)
-							return
-						}
-						defer f.Close()
-
-						hash := sha1.New()
-						if _, err := io.Copy(hash, f); err != nil {
-							log.Printf("error calculating sha1sum: %v for: %s/%s", err, *out, filename)
-						}
-						bs := hash.Sum(nil)
-						if downloadType.SHA1 != fmt.Sprintf("%x", bs) {
-							log.Printf("SHA1 checksum failed for %s -- expected %s but got %x", filename, downloadType.SHA1, bs)
-						} // else {
-						// 	log.Printf("SHA1 checksum is good for %s/%s -- %x", *out, filename, bs)
-						// }
-					}
-					if downloadType.MD5 != "" {
-						f, err := os.Open(fmt.Sprintf("%s/%s", *out, filename))
-						if err != nil {
-							log.Printf("error reading file: %v for: %s/%s", err, *out, filename)
-							return
-						}
-						defer f.Close()
-
-						hash := md5.New()
-						if _, err := io.Copy(hash, f); err != nil {
-							log.Printf("error calculating md5sum: %v for: %s/%s", err, *out, filename)
-						}
-						bs := hash.Sum(nil)
-						if downloadType.MD5 != fmt.Sprintf("%x", bs) {
-							log.Printf("MD5 checksum failed for %s -- expected %s but got %x", filename, downloadType.MD5, bs)
-						} // else {
-						// 	log.Printf("MD5 checksum is good for %s/%s -- %x", *out, filename, bs)
-						// }
-					}
+					check_checksum(pathedFilename, downloadType.MD5,  "md5sum ")
+					check_checksum(pathedFilename, downloadType.SHA1, "sha1sum")
 
 				}(fmt.Sprintf("%s.%s", prod.HumanName, strings.ToLower(strings.TrimPrefix(downloadType.Name, "."))), downloadType.URL.Web)
 			}
 		}
 	}
 	group.Wait()
+}
+
+
+func main() {
+	flags.Parse(os.Args[1:])
+	if *gameKey == "" {
+		log.Fatal("Missing key")
+	}
+
+	log.SetFlags(0)
+	log.SetOutput(new(logger))
+
+	// Build order endpoint URL
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	u.Path = path.Join(u.Path, "order")
+	u.Path = path.Join(u.Path, *gameKey)
+
+	// Fetch order information
+	resp, err := http.Get(u.String())
+	if err != nil {
+		log.Fatalf("error downloading order information %s: %v", u, err)
+	}
+	defer resp.Body.Close()
+	buf, err := ioutil.ReadAll(resp.Body)
+	order := &HumbleBundleOrder{}
+	err = json.Unmarshal(buf, order)
+	if err != nil {
+		log.Fatalf("error unmarshaling order: %v", err)
+	}
+
+	if strings.ToLower(*types) == "y" {
+		get_download_types(*order)
+		os.Exit(1)
+	}
+
+	// setup or use existing directory for downloads
+	if *out == "" {
+		log.Printf("Human Name: %s", order.Product.HumanName)
+		if order.Product.HumanName == "" {
+			pwd, err := os.Getwd()
+			if err != nil {
+				log.Fatal(err)
+			}
+			*out = fmt.Sprintf("%s/books", pwd)
+		} else {
+			order.Product.HumanName = strings.Replace(order.Product.HumanName, "/", "_", -1)
+			*out = order.Product.HumanName
+		}
+	}
+	_ = os.MkdirAll(*out, 0777)
+	log.Printf("Saving files into %s", *out)
+
+	// setup include and exclude requirements (based on download types)
+	// use ".include" and ".exclude" files if they optionally exist
+	setup_exclude_fileTypes()
+	setup_include_fileTypes()
+
+	// Get downloads
+	get_downloads(*order)
+
 }
