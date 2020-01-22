@@ -80,7 +80,7 @@ func Contains(a []string, x string) bool {
 
 func check_checksum(filename string, checksum string, checksum_type string) {
 	if checksum == "" {
-		log.Println("checksum is empty, nothing to check")
+		log.Printf("%s checksum empty   for %160s -- no checking possible\n", checksum_type, filename)
 		return
 	}
 
@@ -92,27 +92,25 @@ func check_checksum(filename string, checksum string, checksum_type string) {
 	case "sha1sum":
 	    hash = sha1.New()
 	default:
-		log.Printf(
-			"checksum type is not valid, we have \"%s\", but it needs to be \"%s\" or \"%s\"",
-			checksum_type, "md5sum ", "sha1sum")
+		log.Printf("checksum type bad   for %160s, we have \"%s\", but it needs to be \"%s\" or \"%s\"\n", filename, checksum_type, "md5sum ", "sha1sum")
 		return
 	}
 
 	f, err := os.Open(filename)
 	if err != nil {
-		log.Printf("error reading file: %v \tfor: %s", err, filename)
+		log.Printf("error reading file: %v \tfor: %s\n", err, filename)
 		return
 	}
 	defer f.Close()
 
 	if _, err := io.Copy(hash, f); err != nil {
-		log.Printf("error caluclating %s: %v for: %s", checksum_type, err, filename)
+		log.Printf("error caluclating %s: %v for: %s\n", checksum_type, err, filename)
 	}
 	bs := hash.Sum(nil)
 	if checksum != fmt.Sprintf("%x", bs) {
-		log.Printf("%s checksum failed  for %120s -- expected %s but got %x", checksum_type, filename, checksum, bs)
+		log.Printf("%s checksum failed  for %160s -- expected %s but got %x", checksum_type, filename, checksum, bs)
 	} else {
-		log.Printf("%s checksum is good for %120s -- %x", checksum_type, filename, bs)
+		log.Printf("%s checksum is good for %160s -- %x", checksum_type, filename, bs)
 	}
 }
 
@@ -231,17 +229,17 @@ func get_downloads(order HumbleBundleOrder) {
 					fileInfo, err := os.Stat(pathedFilename)
 					if err == nil {
 						// file exists, check size against size in order
-						// fmt.Printf("filename: %-120s\t%12d\t%12d\n", pathedFilename, fileInfo.Size(), expectedFileSize)
+						// fmt.Printf("filename: %-160s\t%12d\t%12d\n", pathedFilename, fileInfo.Size(), expectedFileSize)
 						if fileInfo.Size() == expectedFileSize {
 							check_checksum(pathedFilename, downloadType.MD5,  "md5sum ")
 							check_checksum(pathedFilename, downloadType.SHA1, "sha1sum")
 							return
 						} else {
 							// to be done... perhaps, continue download ...
-							fmt.Printf("filename: %-120s\t%12d\t%s\t%s\n", pathedFilename, expectedFileSize, "new download to be started....", downloadURL)
+							fmt.Printf("filename: %-160s\t%12d\t%s\t%s\n", pathedFilename, expectedFileSize, "new download to be started....", downloadURL)
 						}
 					} else {
-						fmt.Printf("filename: %-120s\t%12d\t%s\t%s\n", pathedFilename, expectedFileSize, "download started....", downloadURL)
+						fmt.Printf("filename: %-160s\t%12d\t%s\t%s\n", pathedFilename, expectedFileSize, "download started....", downloadURL)
 					}
 
 					resp, err := http.Get(downloadURL)
