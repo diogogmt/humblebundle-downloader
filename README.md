@@ -134,3 +134,25 @@ Download all books from your Humble Bundle Order
 ```shell
 humblebundle-downloader -key=yourDownloadKey
 ```
+
+NB: downloads will now not re-download files that have already been downloaded,
+instead it will check the file size with expected file size; if they are the same,
+then it will do normal checksums only.  If they are different, then a new download
+will be started.
+
+If files have changed since your last download, you may well get a bunch of
+updates WITHOUT needing to download all files again.
+
+
+In time.... I may do a further adjustment to do restartable downloads....
+
+
+Show download types
+
+```shell
+humblebundle-downloader -key=yourDownloadKey -types y
+```
+
+New ability to include and/or exclude download types
+with .include and .exclude files
+
