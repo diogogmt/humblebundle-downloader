@@ -10,9 +10,18 @@ define build
 		./cmd/hbd
 endef
 
+## release: publishes binaries to gh
+release:
+	goreleaser
+
 ## build: builds hbd binary
 build:
 	$(call build)
+
+## tag: creates a new git tag
+tag:
+	git tag -a $(VERSION) -m "$(VERSION)"
+	git push origin $(VERSION)
 
 ## imports: runs goimports
 imports:
