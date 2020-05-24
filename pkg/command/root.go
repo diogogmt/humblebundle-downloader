@@ -57,6 +57,7 @@ func (c *RootCmd) RegisterFlags(fs *flag.FlagSet) {
 
 // Exec executes the root command
 func (c *RootCmd) Exec(ctx context.Context, args []string) error {
+	c.FlagSet.Usage()
 	return nil
 }
 
