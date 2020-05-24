@@ -2,6 +2,7 @@ BIN_DIR ?= ./bin
 BIN_NAME ?= hbd
 define build
 	go build \
+		-mod=vendor \
 		-tags='$(BUILD_TAGS)' \
 		-gcflags='-e' \
 		-ldflags='-s -w' \

@@ -1,11 +1,11 @@
 # humble bundle downloader
+Download your favourite bundles from [humblebundle](https://www.humblebundle.com/) via the command line.
 
 <a href="http://golang.org"><img alt="Go package" src="https://golang.org/doc/gopher/appenginegophercolor.jpg" width="20%" /></a>
 <a href="http://trello.com"><img src="http://www.gamasutra.com/db_area/images/news/2017/Feb/291206/humblebundle128.jpg"></a>
 
-[![GoDoc](https://img.shields.io/badge/godoc-reference-5272B4.svg?style=for-the-badge)](https://godoc.org/diogogmt/humblebundle-downloader)
+[![GoDoc](https://img.shields.io/badge/godoc-reference-5272B4.svg?style=for-the-badge)](https://godoc.org/github.com/diogogmt/humblebundle-downloader)
 
-Download your favourite bundles from [huumblebundle](https://www.humblebundle.com/) via the command line.
 
 - [humble bundle downloader](#humble-bundle-downloader)
   - [Installation](#installation)
@@ -14,6 +14,8 @@ Download your favourite bundles from [huumblebundle](https://www.humblebundle.co
       - [Homebrew](#homebrew)
   - [Usage](#usage)
     - [Examples](#examples)
+  - [Contributing](#contributing)
+      - [Makefile](#makefile)
   - [TODO](#todo)
 
 ## Installation
@@ -66,6 +68,7 @@ $ hbd download -key xxx -types pdf -dest ./bundle-pdf
 
 # download all assets using JWT _simpleauth_sess cookie for bundles linked to an account
 $ hbd download -jwt=eyJ1... -key xxx -types pdf -dest ./bundle-pdf
+```
 
 ## Contributing
 
@@ -83,7 +86,6 @@ Usage:
   staticcheck   runs staticcheck
   vendor        updates vendored dependencies
   help          prints this help message
-
 ```
 
 ## TODO
