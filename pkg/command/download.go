@@ -6,11 +6,13 @@ import (
 	"crypto/sha1"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"hash"
+	"io"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"diogogmt.com/hbd/pkg/hbclient"
 	"github.com/peterbourgon/ff/v2/ffcli"
@@ -140,59 +142,112 @@ func (c *DownloadCmd) downloadBundle(ctx context.Context, order *hbclient.Order)
 	return nil
 }
 
+func HashCheckOne(fpath string, hash hash.Hash, label string, expected string) error {
+
+	f, err := os.Open(fpath)
+	if err != nil {
+		return errors.Errorf("error reading file: %v for: %s", err, fpath)
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(hash, f); err != nil {
+		return errors.Errorf("error calculating %s: %v for: %s", label, err, fpath)
+	}
+	bs := hash.Sum(nil)
+	if expected != fmt.Sprintf("%x", bs) {
+		return errors.Errorf("%s checksum failed for %s -- expected %s but got %x", label, fpath, expected, bs)
+	}
+	return nil
+}
+
+func HashCheck(fpath string, asset *hbclient.DownloadType) error {
+	// Note:  I've seen files where the md5 passed but the sha1 failed
+	if asset.MD5 != "" {
+		return HashCheckOne(fpath, md5.New(), "MD5", asset.MD5)
+	} else if asset.SHA1 != "" {
+		return HashCheckOne(fpath, sha1.New(), "SHA1", asset.SHA1)
+	}
+	return nil
+}
+
+// Check results of Get or Head and parse Last-Modified
+func HttpChecksAndTime(resp *http.Response, err error) (*http.Response, *time.Time, error) {
+
+	if err != nil {
+		return resp, nil, errors.Wrapf(err, "%s book %s", resp.Request.Method, resp.Request.URL.String())
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return resp, nil, errors.Errorf("invalid response status code %d", resp.StatusCode)
+	}
+
+	bookLastmodTime, err := http.ParseTime(resp.Header.Get("Last-Modified"))
+	if err != nil {
+		return resp, nil, errors.Wrapf(err, "http.ParseTime last-modified header %s", resp.Header.Get("Last-Modified"))
+	}
+	return resp, &bookLastmodTime, nil
+}
+
 // downloadAsset downlads the assets of a bundle
 func (c *DownloadCmd) downloadAsset(ctx context.Context, asset *hbclient.DownloadType) error {
 	filename := fmt.Sprintf("%s.%s", asset.HumanName, strings.ToLower(strings.TrimPrefix(asset.Name, ".")))
 	downloadURL := asset.URL.Web
+
+	// fix filename
 	filename = strings.ReplaceAll(filename, "/", "_")
-	resp, err := http.Get(downloadURL)
-	if err != nil {
-		return errors.Wrapf(err, "http.Get book %s", downloadURL)
+	if strings.HasSuffix(filename, ".supplement") {
+		filename = strings.TrimSuffix(filename, ".supplement") + "_supplement.zip"
 	}
-	defer resp.Body.Close()
-
-	bookLastmodTime, err := http.ParseTime(resp.Header.Get("Last-Modified"))
-	if err != nil {
-		return errors.Wrapf(err, "http.ParseTime last-modified header %s", resp.Header.Get("Last-Modified"))
+	if strings.HasSuffix(filename, ".download") {
+		filename = strings.TrimSuffix(filename, ".download") + "_video.zip"
 	}
 
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return errors.Errorf("invalid response status code %d", resp.StatusCode)
+	fpath := fmt.Sprintf("%s/%s", c.Conf.Dest, filename)
+
+	if HashCheck(fpath, asset) == nil {
+		fmt.Println("Already exists:", fpath)
+		resp, bookLastmodTime, err := HttpChecksAndTime(http.Head(downloadURL))
+		if resp != nil {
+			defer resp.Body.Close()
+		}
+		if err != nil {
+			return err
+		}
+
+		if err = os.Chtimes(fpath, *bookLastmodTime, *bookLastmodTime); err != nil {
+			return errors.Wrap(err, "os.Chtimes")
+		}
+		return nil
 	}
 
-	s, err := ioutil.ReadAll(resp.Body)
+	resp, bookLastmodTime, err := HttpChecksAndTime(http.Get(downloadURL))
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
-		return errors.Wrap(err, "ioutil.ReadAll response body")
+		return err
 	}
 
-	bookFile, err := os.Create(fmt.Sprintf("%s/%s", c.Conf.Dest, filename))
+	bookFile, err := os.Create(fpath)
 	if err != nil {
-		return errors.Wrapf(err, "os.Create %s/%s", c.Conf.Dest, filename)
+		return errors.Wrapf(err, "os.Create %s", fpath)
 	}
 	defer bookFile.Close()
 
-	if _, err = bookFile.Write(s); err != nil {
-		return errors.Wrap(err, "writting book file")
+	fmt.Println("Downloading:", fpath)
+	_, err = io.Copy(bookFile, resp.Body)
+	if err != nil {
+		return errors.Errorf("error copying response body to file (%s): %v", fpath, err)
 	}
-	if err := os.Chtimes(fmt.Sprintf("%s/%s", c.Conf.Dest, filename), bookLastmodTime, bookLastmodTime); err != nil {
+
+	if err := os.Chtimes(fpath, *bookLastmodTime, *bookLastmodTime); err != nil {
 		return errors.Wrap(err, "os.Chtimes")
 	}
 
-	if asset.SHA1 != "" {
-		hash := sha1.New()
-		hash.Write([]byte(s))
-		bs := hash.Sum(nil)
-		if asset.SHA1 != fmt.Sprintf("%x", bs) {
-			return errors.Errorf("SHA1 checksum failed for %s -- expected %s but got %x", filename, asset.SHA1, bs)
-		}
+	err = HashCheck(fpath, asset)
+	if err != nil {
+		return err
 	}
-	if asset.MD5 != "" {
-		hash := md5.New()
-		hash.Write([]byte(s))
-		md5Checksum := fmt.Sprintf("%x", hash.Sum(nil))
-		if asset.MD5 != md5Checksum {
-			return errors.Errorf("MD5 checksum failed for %s -- expected %s but got %s", filename, asset.MD5, md5Checksum)
-		}
-	}
+	fmt.Println("Download complete:", fpath)
+
 	return nil
 }
